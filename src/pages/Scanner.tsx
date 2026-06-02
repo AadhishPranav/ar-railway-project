@@ -1,195 +1,86 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { Camera, ArrowLeft, CameraOff, Loader2, Scan } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { AROverlay } from "@/components/AROverlay";
 import { Footer } from "@/components/Footer";
+import { useCameraStream } from "@/lib/camera/useCameraStream";
+import { useSignRecognitionPreload } from "@/hooks/useSignRecognition";
+import {
+  saveRecognitionResult,
+  signRecognitionEngine,
+} from "@/lib/signRecognition";
 
-type ScanState =
-  | "requesting"
-  | "streaming"
-  | "capturing"
-  | "processing"
-  | "error";
+type ScanPhase = "idle" | "capturing" | "processing";
 
 export default function Scanner() {
   const [, setLocation] = useLocation();
-  const [scanState, setScanState] = useState<ScanState>("requesting");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const { videoRef, phase, isLive, errorMessage, startCamera, stopCamera } =
+    useCameraStream();
+  const { ready: recognitionReady, error: recognitionPreloadError } =
+    useSignRecognitionPreload();
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const requestTimeoutRef = useRef<number | null>(null);
-  const isProduction = import.meta.env.PROD;
+  const [scanPhase, setScanPhase] = useState<ScanPhase>("idle");
+  const [processingError, setProcessingError] = useState<string | null>(null);
 
-  const logCameraError = useCallback((context: string, err: unknown) => {
-    const e = err as
-      | (Error & { name?: string; message?: string })
-      | { name?: string; message?: string }
-      | unknown;
+  const captureEnabled = isLive && recognitionReady && scanPhase === "idle";
 
-    // eslint-disable-next-line no-console
-    console.error(`[camera] ${context}`, {
-      error: e,
-      isSecureContext: window.isSecureContext,
-      hasMediaDevices: !!navigator.mediaDevices,
-      hasGetUserMedia: !!navigator.mediaDevices?.getUserMedia,
-      userAgent: navigator.userAgent,
-    });
-  }, []);
-
-  const startCamera = useCallback(async () => {
-    try {
-      if (requestTimeoutRef.current) {
-        window.clearTimeout(requestTimeoutRef.current);
-        requestTimeoutRef.current = null;
-      }
-
-      // Stop any previous stream before requesting a new one
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-
-      setScanState("requesting");
-      setErrorMessage(null);
-
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error(
-          "Camera API unavailable: navigator.mediaDevices.getUserMedia is not supported in this browser."
-        );
-      }
-
-      if (!window.isSecureContext) {
-        // eslint-disable-next-line no-console
-        console.warn("[camera] Insecure context detected; attempting getUserMedia anyway", {
-          hostname: window.location.hostname,
-          origin: window.location.origin,
-          mode: isProduction ? "production" : "development",
-        });
-      }
-
-      // Prevent infinite loading if the browser never resolves/rejects.
-      requestTimeoutRef.current = window.setTimeout(() => {
-        const msg =
-          "Camera request timed out. If you're on mobile, check site permissions and retry.";
-        // eslint-disable-next-line no-console
-        console.error("[camera] timeout", {
-          msg,
-          isSecureContext: window.isSecureContext,
-          origin: window.location.origin,
-        });
-        setErrorMessage(msg);
-        setScanState("error");
-      }, 12000);
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
-      streamRef.current = stream;
-
-      if (requestTimeoutRef.current) {
-        window.clearTimeout(requestTimeoutRef.current);
-        requestTimeoutRef.current = null;
-      }
-
-      // Move to streaming state even if video element isn't mounted yet.
-      setScanState("streaming");
-    } catch (err) {
-      logCameraError("getUserMedia failed", err);
-      const name = err instanceof Error ? err.name : undefined;
-      const msg = err instanceof Error ? err.message : String(err);
-
-      setErrorMessage(
-        name === "NotAllowedError"
-          ? `Camera access denied by browser/permissions. (${name}) ${msg}`
-          : name === "SecurityError"
-            ? isProduction
-              ? `Camera blocked due to insecure origin in production. Please use HTTPS. (${name}) ${msg}`
-              : `Browser blocked camera for this origin. In dev over LAN, switch to HTTPS if possible. (${name}) ${msg}`
-          : name === "NotFoundError"
-            ? `No camera device found. (${name}) ${msg}`
-            : name === "NotReadableError"
-              ? `Camera is already in use by another app/tab. (${name}) ${msg}`
-              : name
-                ? `Camera error: ${name} — ${msg}`
-                : `Camera error: ${msg}`
-      );
-      setScanState("error");
+  const captureImage = useCallback(async () => {
+    if (!isLive || !videoRef.current || !canvasRef.current) return;
+    if (!recognitionReady) {
+      setProcessingError("Sign library is still loading. Please wait.");
+      return;
     }
-  }, [isProduction, logCameraError]);
-
-  const stopCamera = useCallback(() => {
-    if (requestTimeoutRef.current) {
-      window.clearTimeout(requestTimeoutRef.current);
-      requestTimeoutRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    startCamera();
-    return () => stopCamera();
-  }, [startCamera, stopCamera]);
-
-  // Attach stream to video whenever both are ready.
-  useEffect(() => {
-    const video = videoRef.current;
-    const stream = streamRef.current;
-    if (!video || !stream) return;
-    if (scanState !== "streaming" && scanState !== "capturing") return;
-
-    try {
-      if (video.srcObject !== stream) {
-        video.srcObject = stream;
-      }
-
-      const playPromise = video.play();
-      if (playPromise && typeof playPromise.catch === "function") {
-        playPromise.catch((err) => {
-          logCameraError("video.play() rejected", err);
-          setErrorMessage(
-            `Unable to start video playback: ${err instanceof Error ? err.message : String(err)}`
-          );
-          setScanState("error");
-        });
-      }
-    } catch (err) {
-      logCameraError("attaching stream failed", err);
-      setErrorMessage(
-        `Unable to attach camera stream: ${err instanceof Error ? err.message : String(err)}`
-      );
-      setScanState("error");
-    }
-  }, [logCameraError, scanState]);
-
-  const captureImage = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || scanState !== "streaming") return;
-    setScanState("capturing");
 
     const video = videoRef.current;
+    if (video.videoWidth === 0 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      setProcessingError("Camera feed is not ready yet. Wait for the live preview.");
+      return;
+    }
+
+    setScanPhase("capturing");
+    setProcessingError(null);
+
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      setProcessingError("Could not read camera frame.");
+      setScanPhase("idle");
+      return;
+    }
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-    sessionStorage.setItem("capturedImage", dataUrl);
-    stopCamera();
 
-    setScanState("processing");
-    setTimeout(() => {
+    stopCamera();
+    setScanPhase("processing");
+
+    try {
+      sessionStorage.setItem("capturedImage", dataUrl);
+      const matchResult = await signRecognitionEngine.match(dataUrl);
+      saveRecognitionResult(matchResult);
       setLocation("/result");
-    }, 2200);
-  }, [scanState, stopCamera, setLocation]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[signRecognition] capture match failed", err);
+      setProcessingError(
+        err instanceof Error ? err.message : "Sign matching failed. Please try again."
+      );
+      setScanPhase("idle");
+      await startCamera();
+    }
+  }, [isLive, recognitionReady, stopCamera, setLocation, startCamera, videoRef]);
+
+  const showProcessing = scanPhase === "processing";
+  const showStarting = phase === "starting" && !showProcessing;
+  const showError = phase === "error" && !showProcessing;
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       <Navbar />
 
       <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
@@ -199,134 +90,132 @@ export default function Scanner() {
           transition={{ duration: 0.5 }}
           className="w-full max-w-3xl"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="mb-6 flex items-center justify-between">
             <button
               data-testid="button-back"
-              onClick={() => { stopCamera(); setLocation("/"); }}
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors group"
+              onClick={() => {
+                stopCamera();
+                setLocation("/");
+              }}
+              className="group flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
               Back
             </button>
             <div className="flex items-center gap-2 text-xs font-mono text-primary">
               <span className="relative flex h-2 w-2">
-                {scanState === "streaming" && (
+                {isLive && (
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
                 )}
-                <span className={`relative inline-flex h-2 w-2 rounded-full ${scanState === "streaming" ? "bg-primary" : "bg-muted-foreground"}`} />
+                <span
+                  className={`relative inline-flex h-2 w-2 rounded-full ${
+                    isLive ? "bg-primary" : "bg-muted-foreground"
+                  }`}
+                />
               </span>
-              {scanState === "streaming" ? "CAMERA ACTIVE" : scanState === "processing" ? "ANALYZING..." : scanState === "error" ? "ERROR" : "INITIALIZING"}
+              {showProcessing
+                ? "MATCHING..."
+                : isLive
+                  ? "LIVE"
+                  : showError
+                    ? "ERROR"
+                    : "STARTING"}
             </div>
           </div>
 
-          {/* Camera Viewport */}
-          <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-card shadow-2xl shadow-black/50">
-            <canvas ref={canvasRef} className="hidden" />
+          {/* Camera viewport — video always mounted */}
+          <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/50">
+            <canvas ref={canvasRef} className="hidden" aria-hidden />
 
-            <AnimatePresence mode="wait">
-              {(scanState === "streaming" || scanState === "capturing") && (
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`absolute inset-0 z-[1] h-full w-full object-cover ${
+                isLive ? "opacity-100" : "opacity-0"
+              }`}
+              data-testid="video-camera-feed"
+            />
+
+            {isLive && scanPhase === "idle" && (
+              <div className="absolute inset-0 z-[2] pointer-events-none">
+                <AROverlay />
+              </div>
+            )}
+
+            <AnimatePresence>
+              {showStarting && (
                 <motion.div
-                  key="camera"
+                  key="starting"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="relative w-full h-full"
+                  className="absolute inset-0 z-[3] flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur-sm"
                 >
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                    data-testid="video-camera-feed"
-                  />
-                  <AROverlay />
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <div className="px-6 text-center">
+                    <p className="font-mono text-sm text-muted-foreground">
+                      REQUESTING CAMERA PERMISSION…
+                    </p>
+                    <p className="mt-2 max-w-sm text-xs text-muted-foreground">
+                      Allow camera access when your browser asks. This can take a moment on
+                      first use.
+                    </p>
+                  </div>
                 </motion.div>
               )}
 
-              {scanState === "processing" && (
+              {showProcessing && (
                 <motion.div
                   key="processing"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="absolute inset-0 flex flex-col items-center justify-center bg-background/95 backdrop-blur-md gap-6"
+                  className="absolute inset-0 z-[3] flex flex-col items-center justify-center gap-6 bg-background/95 backdrop-blur-md"
                 >
-                  <div className="relative">
-                    <motion.div
-                      className="h-20 w-20 rounded-full border-2 border-primary/20"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                    />
-                    <motion.div
-                      className="absolute inset-2 rounded-full border-t-2 border-primary"
-                      animate={{ rotate: -360 }}
-                      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Scan className="h-7 w-7 text-primary" />
-                    </div>
-                  </div>
+                  <Loader2 className="h-10 w-10 animate-spin text-primary" />
                   <div className="text-center">
-                    <p className="font-mono text-sm text-primary font-bold">AI DETECTION IN PROGRESS</p>
-                    <p className="text-xs text-muted-foreground mt-1">Processing captured image...</p>
-                  </div>
-                  <div className="flex gap-1">
-                    {[0, 0.2, 0.4].map((delay) => (
-                      <motion.div
-                        key={delay}
-                        className="h-1.5 w-1.5 rounded-full bg-primary"
-                        animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1.2, 0.8] }}
-                        transition={{ duration: 1, repeat: Infinity, delay }}
-                      />
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-
-              {scanState === "requesting" && (
-                <motion.div
-                  key="requesting"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="absolute inset-0 flex flex-col items-center justify-center gap-4"
-                >
-                  <Loader2 className="h-8 w-8 text-primary animate-spin" />
-                  <div className="text-center">
-                    <p className="text-sm text-muted-foreground font-mono">
-                      REQUESTING CAMERA PERMISSION...
-                    </p>
-                    <p className="mt-2 max-w-sm text-xs text-muted-foreground">
-                      If you don’t see a prompt, check your browser site settings and allow Camera.
+                    <p className="font-mono text-sm font-bold text-primary">PROCESSING</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Matching against sign library…
                     </p>
                   </div>
                 </motion.div>
               )}
 
-              {scanState === "error" && (
+              {showError && (
                 <motion.div
                   key="error"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="absolute inset-0 flex flex-col items-center justify-center gap-5 p-8 text-center"
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-[3] flex flex-col items-center justify-center gap-5 bg-background/95 p-8 text-center"
                 >
-                  <div className="h-16 w-16 rounded-full bg-destructive/10 border border-destructive/30 flex items-center justify-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full border border-destructive/30 bg-destructive/10">
                     <CameraOff className="h-8 w-8 text-destructive" />
                   </div>
                   <div>
-                    <p className="font-bold text-destructive mb-1">Camera Unavailable</p>
-                    <p className="text-sm text-muted-foreground max-w-md break-words">
-                      {errorMessage ?? "Unknown error"}
+                    <p className="mb-1 font-bold text-destructive">Camera Unavailable</p>
+                    <p
+                      className="mx-auto max-w-md break-words text-sm text-muted-foreground"
+                      data-testid="text-camera-error"
+                    >
+                      {errorMessage ?? "Unknown camera error"}
                     </p>
                     <p className="mt-2 text-[11px] text-muted-foreground/80">
-                      Tip: On mobile, use Chrome/Safari and ensure you’re on HTTPS (or localhost).
+                      Use HTTPS (or localhost). On iPhone, use Safari/Chrome and allow Camera in
+                      Settings → browser → site permissions.
                     </p>
                   </div>
                   <button
+                    type="button"
                     data-testid="button-retry-camera"
-                    onClick={startCamera}
-                    className="rounded-xl border border-primary/30 bg-primary/10 px-6 py-2.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+                    onClick={() => {
+                      setProcessingError(null);
+                      void startCamera();
+                    }}
+                    className="rounded-xl border border-primary/30 bg-primary/10 px-6 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
                   >
                     Try Again
                   </button>
@@ -335,20 +224,21 @@ export default function Scanner() {
             </AnimatePresence>
           </div>
 
-          {/* Controls */}
           <div className="mt-6 flex items-center justify-center">
             <AnimatePresence>
-              {scanState === "streaming" && (
+              {isLive && scanPhase === "idle" && (
                 <motion.button
                   key="capture"
+                  type="button"
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
                   data-testid="button-capture"
-                  onClick={captureImage}
-                  className="group relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-primary/40 bg-primary/10 transition-all hover:border-primary hover:bg-primary/20 active:scale-95"
+                  onClick={() => void captureImage()}
+                  disabled={!captureEnabled}
+                  className="group relative flex h-20 w-20 items-center justify-center rounded-full border-4 border-primary/40 bg-primary/10 transition-all hover:border-primary hover:bg-primary/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <div className="h-14 w-14 rounded-full bg-primary flex items-center justify-center shadow-lg shadow-primary/40 group-hover:shadow-primary/60 transition-shadow">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-lg shadow-primary/40 transition-shadow group-hover:shadow-primary/60 group-disabled:shadow-none">
                     <Camera className="h-6 w-6 text-primary-foreground" />
                   </div>
                 </motion.button>
@@ -356,9 +246,16 @@ export default function Scanner() {
             </AnimatePresence>
           </div>
 
-          {scanState === "streaming" && (
-            <p className="mt-4 text-center text-xs text-muted-foreground font-mono">
-              POINT CAMERA AT RAILWAY SIGN — PRESS BUTTON TO CAPTURE
+          <p className="mt-4 text-center font-mono text-xs text-muted-foreground">
+            {!isLive && phase !== "error" && "Waiting for live camera preview…"}
+            {isLive && !recognitionReady && "Live feed ready — loading sign library…"}
+            {captureEnabled && "POINT AT RAILWAY SIGN — TAP TO CAPTURE"}
+            {isLive && recognitionReady && scanPhase !== "idle" && "Processing…"}
+          </p>
+
+          {(processingError || recognitionPreloadError) && (
+            <p className="mx-auto mt-3 max-w-md text-center text-xs text-destructive">
+              {processingError ?? recognitionPreloadError}
             </p>
           )}
         </motion.div>

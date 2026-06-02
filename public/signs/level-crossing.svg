@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Level crossing sign">
+  <rect width="200" height="200" rx="16" fill="#1a1f2e"/>
+  <circle cx="100" cy="100" r="72" fill="#fff" stroke="#CA8A04" stroke-width="8"/>
+  <text x="100" y="88" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#111">LEVEL</text>
+  <text x="100" y="112" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="bold" fill="#111">CROSS</text>
+  <rect x="70" y="120" width="60" height="8" fill="#111"/>
+  <rect x="70" y="132" width="60" height="8" fill="#111"/>
+</svg>

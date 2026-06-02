@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Signal ahead sign">
+  <rect width="200" height="200" rx="16" fill="#1a1f2e"/>
+  <rect x="85" y="30" width="30" height="140" fill="#374151"/>
+  <circle cx="100" cy="70" r="22" fill="#059669"/>
+  <circle cx="100" cy="115" r="22" fill="#374151"/>
+  <circle cx="100" cy="160" r="22" fill="#DC2626"/>
+</svg>

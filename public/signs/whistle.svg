@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Whistle sign">
+  <rect width="200" height="200" rx="16" fill="#1a1f2e"/>
+  <rect x="40" y="50" width="120" height="100" rx="8" fill="#2563EB" stroke="#fff" stroke-width="4"/>
+  <text x="100" y="95" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#fff">SOUND</text>
+  <text x="100" y="125" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="bold" fill="#fff">HORN</text>
+</svg>

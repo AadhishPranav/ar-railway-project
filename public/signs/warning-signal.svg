@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Warning signal sign">
+  <rect width="200" height="200" rx="16" fill="#1a1f2e"/>
+  <rect x="85" y="35" width="30" height="130" fill="#374151"/>
+  <circle cx="100" cy="75" r="24" fill="#CA8A04" stroke="#111" stroke-width="3"/>
+  <text x="100" y="84" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" font-weight="bold" fill="#111">!</text>
+</svg>

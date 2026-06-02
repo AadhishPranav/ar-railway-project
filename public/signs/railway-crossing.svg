@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Railway crossing sign">
+  <rect width="200" height="200" rx="16" fill="#1a1f2e"/>
+  <polygon points="100,24 176,176 24,176" fill="#CA8A04" stroke="#111" stroke-width="4"/>
+  <rect x="88" y="70" width="24" height="80" fill="#111"/>
+  <rect x="60" y="118" width="80" height="16" fill="#111"/>
+</svg>

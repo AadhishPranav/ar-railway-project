@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Caution sign">
+  <rect width="200" height="200" rx="16" fill="#1a1f2e"/>
+  <polygon points="100,28 172,172 28,172" fill="#CA8A04" stroke="#111" stroke-width="4"/>
+  <text x="100" y="125" text-anchor="middle" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="#111">!</text>
+</svg>
